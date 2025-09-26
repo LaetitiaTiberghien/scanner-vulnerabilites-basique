@@ -4,6 +4,9 @@ Auteur: Laetitia Tiberghien
 Description: Scan simple de ports avec multithreading
 """
 
+import csv
+import json
+import logging
 import socket
 import threading
 import argparse
@@ -86,18 +89,51 @@ class PortScanner :
                     print(f"[+] Port {port} ouvert - {service}")
                     self.open_ports.append((port, service))
 
+    def save_results(self, filename: str = None, fmt: str = "json"):
+        if not filename:
+            return
+        fmt = fmt.lower()
+        if fmt == "json":
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(self.open_ports, f, ensure_ascii=False, indent=2)
+            logging.info(f"Résultats sauvegardés en JSON -> {filename}")
+        elif fmt == "csv":
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=["port", "service", "banner"])
+                writer.writeheader()
+                for r in self.open_ports:
+                    # si r est un tuple (port, service) -> convertir
+                    if isinstance(r, tuple):
+                        port, service = r[0], r[1] if len(r) > 1 else None
+                        row = {"port": port, "service": service, "banner": ""}
+                    elif isinstance(r, dict):
+                        # assurez-vous que les clés existent
+                        row = {"port": r.get("port"), "service": r.get("service"), "banner": r.get("banner", "")}
+                    else:
+                        # fallback générique
+                        row = {"port": None, "service": str(r), "banner": ""}
+                    writer.writerow(row)
+            logging.info(f"Résultats sauvegardés en CSV -> {filename}")
+        else:
+            logging.warning("Format inconnu pour la sauvegarde. Utilise json/csv.")
+
 def main():
     parser = argparse.ArgumentParser(description="Scanner de Ports Basique")
     parser.add_argument("target", help="IP ou domaine à scanner")
     parser.add_argument("-p", "--ports", default="1-1024", help="Plage de ports à scanner")
     parser.add_argument("-t", "--threads", type=int, default=10, help="Nombre de threads")
+    parser.add_argument("--timeout", type=float, default=2, help="Timeout par connexion (défaut: 2s)")
+    parser.add_argument("-o", "--output", help="Fichier de sortie (ex: results.json ou results.csv)")
+    parser.add_argument("--format", choices=["json", "csv"], default="json", help="Format de sortie")
+    
+
     
     args = parser.parse_args()
     
     print(f"[*] Démarrage du scan sur {args.target}")
     start_time = datetime.now()
     
-    scanner = PortScanner(args.target, args.threads)
+    scanner = PortScanner(args.target, args.threads, args.timeout)
     
     resolved_target = scanner.resolve_target()
     if not resolved_target:
@@ -112,6 +148,10 @@ def main():
     elapsed_time = datetime.now() - start_time
     print(f"\n[o] Scan terminé en {elapsed_time.total_seconds():.2f} secondes")
     print(f"[+] {len(scanner.open_ports)} ports ouverts trouvés")
+
+    # sauvegarde des résultats si demandé
+    if args.output:
+        scanner.save_results(args.output, fmt=args.format)
 
 
 if __name__ == "__main__":
